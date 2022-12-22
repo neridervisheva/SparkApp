@@ -63,27 +63,83 @@ object App {
         .drop("WeatherDelay").drop("NASDelay").drop("SecurityDelay")
         .drop("LateAircraftDelay")
 
-    df1.printSchema()
-    df1.show(5, truncate = false)
-
-    println("Number of instances: " + df1.count)
+    //df1.printSchema()
+    //df1.show(5, truncate = false)
 
     // PROCESSING THE DATA
 
-    // Remove instances of cancelled flights
-    val df2 = df1.filter($"Cancelled".equalTo("0"))
+    // Remove duplicated rows
+    val df1_distinct = df1.distinct()
 
-    println("Number of instances: " + df2.count)
+    // Remove instances of cancelled flights
+    val df2 = df1_distinct.filter($"Cancelled".equalTo("0"))
+
+    //println("Number of instances: " + df2.count)
 
     println("Missing values for each variable:")
-    df1.select(df2.columns
-        .map(c => sum(col(c).isNull.cast("int")).alias(c)): _*).show
+    //df1.select(df2.columns
+    //    .map(c => sum(col(c).isNull.cast("int")).alias(c)): _*).show
 
     // There are variables with missing values: DeptTime, TailNum,
     // CRSElapsedTime, ArrDelay, TaxiOut and CancellationCode
 
     // CancellationCode has more than 97% missing -> remove it
-    val df3 = df2.drop("CancellationCode")
+    var df3 = df2.drop("CancellationCode")
+
+    // CRSElapsedTime = CRSArrTime - CRSDepTime
+    // There are some wrong values for CRSElapsedTime, so all of the rows are imputed
+    // Convertirlo a hhmm o dejarlo en minutos?
+
+    // CORRECCION: This can not be imputed this way because as the ArrTime and DeptTime
+    // are in local time, the time zone could be different, not important because only
+    // the values for a few rows are missing
+
+    // Put time in correct format, full 4 digits
+    //val df4 = df3.withColumn("CRSArrTimeNew", when(length(col("CRSArrTime")) === 3, concat(lit("0"),col("CRSArrTime")))
+    //    .when(length(col("CRSArrTime")) === 2, concat(lit("00"),col("CRSArrTime")))
+    //    .otherwise(col("CRSArrTime")))
+
+    //var df5 = df4.withColumn("CRSDepTimeNew", when(length(col("CRSDepTime")) === 3, concat(lit("0"),col("CRSDepTime")))
+    //    .when(length(col("CRSDepTime")) === 2, concat(lit("00"),col("CRSDepTime")))
+    //    .otherwise(col("CRSDepTime")))
+
+    // New auxiliar columns for calculations
+    //df5 = df5.withColumn("CRSArrTimeNewHour", substring(col("CRSArrTimeNew"), 1,2))
+    //df5 = df5.withColumn("CRSArrTimeNewMinute", substring(col("CRSArrTimeNew"), 3,2))
+
+    //df5 = df5.withColumn("CRSDepTimeNewHour", substring(col("CRSDepTimeNew"), 1,2))
+    //df5 = df5.withColumn("CRSDepTimeNewMinute", substring(col("CRSDepTimeNew"), 3,2))
+
+    //df5.select("CRSArrTime","CRSArrTimeNew","CRSArrTimeNewHour","CRSArrTimeNewMinute").show(false)
+    //df5.select("CRSDepTime","CRSDepTimeNew","CRSDepTimeNewHour","CRSDepTimeNewMinute").show(false)
+
+    // Compute the real elapsed time
+    //df5 = df5.withColumn("CRSElapsedTimeNew", when(col("CRSArrTimeNewHour") < col("CRSDepTimeNewHour"), (lit(24) + col("CRSArrTimeNewHour") - col("CRSDepTimeNewHour"))*60 - col("CRSDepTimeNewMinute") + col("CRSArrTimeNewMinute"))
+    //    .otherwise((col("CRSArrTimeNewHour") - col("CRSDepTimeNewHour"))*60 - col("CRSDepTimeNewMinute") + col("CRSArrTimeNewMinute")))
+
+    //df5 = df5.withColumn("CRSElapsedTimeNew",col("CRSElapsedTimeNew").cast(IntegerType))
+
+    //df5.select("CRSArrTime","CRSDepTime","CRSElapsedTime","CRSElapsedTimeNew").show(false)
+
+    // DepTime = CRSDepTime + DepDelay
+
+    // Put time in correct format, full 4 digits
+    df3 = df3.withColumn("CRSDepTimeNew", when(length(col("CRSDepTime")) === 3, concat(lit("0"),col("CRSDepTime")))
+        .when(length(col("CRSDepTime")) === 2, concat(lit("00"),col("CRSDepTime")))
+        .otherwise(col("CRSDepTime")))
+
+    // New auxiliar columns for calculations
+    df3 = df3.withColumn("CRSDepTimeNewHour", substring(col("CRSDepTimeNew"), 1,2))
+    df3 = df3.withColumn("CRSDepTimeNewHourMinute", substring(col("CRSDepTimeNew"), 3,2))
+
+    //df3 = df3.withColumn("DepDelayNew", when(col("DepDelay") === 0, col("DepDelayNew") = col("CRSDepTimeNew"))
+    //    .when(col("DepDelay") < 60 && col("DepDelay") > 0, )
+    //    .otherwise())
+
+
+    df3.select("DepDelay","DepDelayNew").show(false)
+
+    // Delete auxiliary columns
 
     println("Unique values of each variable:")
     df3.select("Year").distinct().show()
@@ -108,19 +164,6 @@ object App {
     // Month: 1, 2, 3, 4, ... to January, February, March, April...?
     // DayOfWeek: 1, 2, ... to Monday, Tuesday, ...?
     // Que es TaxiOut?
-
-    // CRSElapsedTime = CRSArrTime - CRSDepTime
-    // Hay algunos valores que están mal en CRSElapsedTime, corregirlos?
-    // Hay que pensar mejor la formula para restar, ya que no se cumple siempre
-    // Convertirlo a minutos o dejarlo en formato hhmm?
-    //var CRSElapsedTime_new = df3.select("CRSArrTime", "CRSDepTime", "CRSElapsedTime")
-    //    .withColumn("CRSElapsedTimeNew", col("CRSArrTime") - col("CRSDepTime"))
-    //CRSElapsedTime_new.show()
-
-    // DeptTime = CRSDepTime + DepDelay
-    // Hay que convertir DepDelay de minutos a hhmm
-
-
 
   }
 }
